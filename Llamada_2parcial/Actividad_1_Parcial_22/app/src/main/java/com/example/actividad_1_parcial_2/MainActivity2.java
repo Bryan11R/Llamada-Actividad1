@@ -9,12 +9,16 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
 import android.telephony.PhoneStateListener;
 import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -36,6 +40,12 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main2);
 
+        // Keep the screen on
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Disable the keyguard (lock screen)
+        Window window = getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
 
         numeroGuardadoTextView = findViewById(R.id.numero_guardado);
         Intent intent = getIntent();
@@ -65,11 +75,10 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
             @Override
             public void run() {
                 if (!callAnswered) {
-                    // Obtener las coordenadas actuales
-                    double latitude = 0.0;  // Valor de latitud predeterminado
-                    double longitude = 0.0; // Valor de longitud predeterminado
+                    // Obtain the current coordinates
+                    double latitude = 0.0;  // Default latitude value
+                    double longitude = 0.0; // Default longitude value
 
-                    // Verificar si se ha obtenido la última ubicación conocida
                     if (ActivityCompat.checkSelfPermission(MainActivity2.this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                         Location lastKnownLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                         if (lastKnownLocation != null) {
@@ -78,8 +87,14 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
                         }
                     }
 
-                    // Llamar al método sendMessageWithCoordinates con las coordenadas
+                    // Call the sendMessageWithCoordinates method with the coordinates
                     sendMessageWithCoordinates(latitude, longitude);
+
+                    // Call back to the same number
+                    callNumber(incomingPhoneNumber);
+
+                    // Silence the call
+                    silenceCall();
                 }
             }
         };
@@ -148,15 +163,11 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
     }
 
     private void sendMessageWithCoordinates(double latitude, double longitude) {
-        // Componer el mensaje con las coordenadas
         String message = "Mis coordenadas son: " + latitude + ", " + longitude;
 
-        // Verificar si la aplicación tiene permiso para enviar mensajes de texto
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            // Solicitar permiso para enviar mensajes de texto
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.SEND_SMS}, 3);
         } else {
-            // Enviar el mensaje de texto automáticamente
             sendSMS(incomingPhoneNumber, message);
         }
     }
@@ -173,25 +184,19 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
 
     @Override
     public void onLocationChanged(Location location) {
-        // Actualizar las coordenadas en la interfaz de usuario
         double latitude = location.getLatitude();
         double longitude = location.getLongitude();
         coordenadasTextView.setText("Latitud: " + latitude + ", Longitud: " + longitude);
 
-        // Enviar mensaje después de 7 segundos si la llamada no ha sido contestada
         if (!callAnswered) {
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    // Verificar nuevamente si la llamada ha sido contestada
                     if (!callAnswered) {
-                        // Obtener las coordenadas actuales
                         double currentLatitude = location.getLatitude();
                         double currentLongitude = location.getLongitude();
 
-                        // Verificar si las coordenadas actuales son diferentes de las anteriores
                         if (latitude != currentLatitude || longitude != currentLongitude) {
-                            // Llamar al método sendMessageWithCoordinates con las coordenadas
                             sendMessageWithCoordinates(currentLatitude, currentLongitude);
                         }
                     }
@@ -208,15 +213,11 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
                 switch (state) {
                     case TelephonyManager.CALL_STATE_RINGING:
                         Toast.makeText(MainActivity2.this, "Llamada entrante: " + phoneNumber, Toast.LENGTH_SHORT).show();
-                        // Resetear el indicador de respuesta de llamada
                         callAnswered = false;
-                        // Verificar si el número de teléfono coincide con el número guardado
                         String numeroGuardado = numeroGuardadoTextView.getText().toString();
                         if (phoneNumber.equals(numeroGuardado)) {
-                            // Iniciar el temporizador de 7 segundos si los números coinciden
                             handler.postDelayed(runnable, 7000);
                         } else {
-                            // Mostrar notificación de número no coincidente
                             showNumberMismatchNotification();
                         }
                         break;
@@ -224,11 +225,8 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
                         Toast.makeText(MainActivity2.this, "Llamada saliente: " + phoneNumber, Toast.LENGTH_SHORT).show();
                         break;
                     case TelephonyManager.CALL_STATE_IDLE:
-                        Toast.makeText(MainActivity2.this, "Llamada finalizada", Toast.LENGTH_SHORT).show();
-                        // Detener el temporizador si la llamada ha sido contestada
-                        if (!callAnswered) {
-                            handler.removeCallbacks(runnable);
-                        }
+                        Toast.makeText(MainActivity2.this, "Llamada terminada", Toast.LENGTH_SHORT).show();
+                        callAnswered = true;
                         break;
                 }
             }
@@ -236,9 +234,42 @@ public class MainActivity2 extends AppCompatActivity implements LocationListener
         telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE);
     }
 
-    private void showNumberMismatchNotification() {
-        // Mostrar una notificación indicando que el número de teléfono no coincide
-        Toast.makeText(MainActivity2.this, "El número no coincide", Toast.LENGTH_SHORT).show();
+    private void callNumber(String phoneNumber) {
+        Intent callIntent = new Intent(Intent.ACTION_CALL);
+        callIntent.setData(Uri.parse("tel:" + phoneNumber));
+        startActivity(callIntent);
     }
 
+    private void silenceCall() {
+        AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audioManager != null) {
+            audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, 0, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+        }
+    }
+
+    private void showNumberMismatchNotification() {
+        // Code to show a notification when the incoming number doesn't match the saved number
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        switch (requestCode) {
+            case 1:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    startLocationUpdates();
+                }
+                break;
+            case 2:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    startCallDetection();
+                }
+                break;
+            case 3:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    sendMessageWithCoordinates(0.0, 0.0);
+                }
+                break;
+        }
+    }
 }
